@@ -371,7 +371,6 @@ const App: React.FC = () => {
       </main>
 
       <section className="w-full max-w-6xl mt-16 mb-24">
-        <ProjectReport />
       </section>
 
       <footer className="w-full max-w-6xl border-t border-slate-800 pt-8 pb-12 text-center">

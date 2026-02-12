@@ -1,0 +1,7 @@
+{
+  "name": "Emotion-Aware Speech AI",
+  "description": "A comprehensive system for human emotion detection via speech, utilizing Gemini Live for real-time analysis, empathetic response generation, and expressive TTS.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

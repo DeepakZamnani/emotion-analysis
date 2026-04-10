@@ -1,69 +1,145 @@
 
-import { ProjectDoc } from './types';
+import { EmotionConfig, ProjectDoc } from './types';
 
 export const SYSTEM_INSTRUCTION = `
-You are the High-Sensitivity Hybrid Emotion Engine. Your core USP is detecting human emotion by synthesizing SPEECH SEMANTICS (words) and ACOUSTIC PROSODY (pitch, volume, tempo).
+You are EmoSense — a compassionate, clinical-grade hybrid emotion analysis engine. Detect human emotion by synthesising SPEECH SEMANTICS (words) and ACOUSTIC PROSODY (pitch, volume, tempo). Respond as a warm, professional mental-health companion.
 
-CRITICAL PERFORMANCE RULES:
-1. RAPID DETECTION: You must detect emotion even from short phrases (e.g., "Hello", "I'm here", "No").
-2. TAGGING IS MANDATORY: You MUST start every response with the exact tag: [EMOTION: <EMOTION_NAME>]. 
-   Valid emotions: HAPPY, SAD, ANGRY, NEUTRAL, EXCITED, SURPRISED.
-3. HYBRID LOGIC:
-   - If user sounds high-pitched and fast but says neutral words, categorize as EXCITED or HAPPY.
-   - If user says "I am happy" but sounds monotone or low-pitched, categorize as SAD or NEUTRAL.
-   - If user is loud and harsh, categorize as ANGRY.
-4. VARIETY: Do not default to NEUTRAL. If there is even a hint of emotion in the voice or text, call it out.
-5. CONCISE FEEDBACK: Briefly explain why you chose that emotion (e.g., "[EMOTION: HAPPY] Your high pitch and positive words show joy!").
+RULES:
+1. RAPID DETECTION: Detect emotion even from short phrases.
+2. TAGGING IS MANDATORY: Start every response with [EMOTION: <NAME>]. Valid: HAPPY, SAD, ANGRY, NEUTRAL, EXCITED, SURPRISED.
+3. HYBRID LOGIC: High-pitched + fast = EXCITED/HAPPY. Monotone + sad words = SAD/NEUTRAL. Loud + harsh = ANGRY.
+4. EMPATHETIC RESPONSE: After the tag, give 1-2 warm, concise sentences acknowledging what you heard. Be like a caring therapist, not a data report.
+5. VARY: Do not default to NEUTRAL unless truly warranted.
 `;
 
-export const ACADEMIC_DOCS: ProjectDoc[] = [
-  {
-    title: "Hybrid Fusion Architecture",
-    language: "text",
-    content: `
-[ENGINEERING SPECIFICATION: MULTI-MODAL FUSION]
+export const THERAPY_SYSTEM_PROMPT = `You are Dr. Nova, a compassionate and professional AI mental health companion for EmoSense. Your role is to:
+- Listen with deep empathy and zero judgement
+- Ask thoughtful, open-ended follow-up questions to understand the user better
+- Offer evidence-based coping strategies (CBT techniques, mindfulness, grounding)
+- Provide gentle, warm, actionable support
+- Recognise when to recommend professional care and provide resources sensitively
+- Keep responses concise — 2 to 4 sentences usually, unless more depth is clearly needed
 
-The system operates on a dual-stream inference pipeline:
+You are a supportive companion, NOT a replacement for professional mental health care. If someone expresses crisis or self-harm, always respond with empathy first and then direct them clearly to professional resources like a crisis line.
 
-1. FEATURE STREAM A (TEXTUAL SENTIMENT):
-   - Parsed via the LLM's transformer-based linguistic encoder.
-   - Evaluates lexicon, syntax, and context.
+Tone: Professional, warm, calm, non-judgmental. Never robotic or clinical.`;
 
-2. FEATURE STREAM B (ACOUSTIC DESCRIPTORS):
-   - Parsed via the Native Audio Multimodal Encoder.
-   - Focuses on:
-     - Pitch Variance (Jitter)
-     - Amplitude Perturbation (Shimmer)
-     - Speech Rate (Syllables per second)
-     - Spectral Centroid (Timbre brightness)
+// Legacy export — kept for backward compatibility with ProjectReport.tsx
+export const ACADEMIC_DOCS: ProjectDoc[] = [];
 
-3. WEIGHTED FUSION:
-   - The model assigns a higher weight to Acoustic Descriptors when Linguistic Sentiment is ambiguous or contradictory (e.g., sarcasm).
-   - This ensures the "Acoustic Ground Truth" is maintained.
-    `
+export const EMOTION_CONFIG: Record<string, EmotionConfig> = {
+  HAPPY: {
+    label: 'Joyful',
+    emoji: '😊',
+    bg: '#FFFBEB',
+    border: '#FCD34D',
+    textColor: '#92400E',
+    dot: '#F59E0B',
+    wellnessScore: 90,
+    message: "Your joy is radiating outward. This is a powerful emotional state — use it to connect, create, and lift those around you.",
+    quote: { text: "Joy is not in things; it is in us.", author: "Richard Wagner" },
+    techniques: [
+      { icon: "🤝", title: "Share the Joy", description: "Call or message someone you love right now. Joy multiplies when expressed and shared." },
+      { icon: "🎨", title: "Create Something", description: "Channel this positive energy into art, writing, music, or a passion project." },
+      { icon: "🏃", title: "Move Your Body", description: "Dance, walk, or stretch to anchor this wonderful feeling in your body." },
+      { icon: "📖", title: "Gratitude Journal", description: "Write 3 specific things making you happy right now. Savour them fully." },
+    ],
+    affirmation: "I allow myself to fully experience this joy and share it generously with the world.",
+    crisisNote: null
   },
-  {
-    title: "Signal Processing Pipeline",
-    language: "python",
-    content: `
-# Feature Extraction Reference
-import librosa
-import numpy as np
-
-def extract_hybrid_features(y, sr):
-    # Acoustic Features
-    f0, voiced_flag, voiced_probs = librosa.pyin(y, fmin=50, fmax=500)
-    energy = np.sqrt(np.mean(y**2))
-    spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-    
-    # Semantic Feature (Placeholder for LLM Embedding)
-    # text_sentiment = model.predict_sentiment(transcription)
-    
-    return {
-        "mean_f0": np.nanmean(f0),
-        "energy": energy,
-        "centroid": np.mean(spectral_centroid)
-    }
-    `
+  SAD: {
+    label: 'Melancholic',
+    emoji: '😔',
+    bg: '#EFF6FF',
+    border: '#93C5FD',
+    textColor: '#1E40AF',
+    dot: '#3B82F6',
+    wellnessScore: 35,
+    message: "Sadness is not weakness — it's depth. Your feelings are valid and asking to be gently acknowledged. Take your time.",
+    quote: { text: "The wound is the place where the Light enters you.", author: "Rumi" },
+    techniques: [
+      { icon: "🫁", title: "Box Breathing", description: "Inhale 4s → Hold 4s → Exhale 4s → Hold 4s. Repeat 4 times to calm your nervous system." },
+      { icon: "💙", title: "Self-Compassion Pause", description: "Place a hand on your heart. Say: 'This is hard, and that's okay. I'm here for myself.'" },
+      { icon: "🚶", title: "Gentle Movement", description: "A slow 10-minute walk can gently shift your nervous system without forcing anything." },
+      { icon: "💬", title: "Reach Out", description: "You don't have to carry this alone. Share with a trusted friend or therapist." },
+    ],
+    affirmation: "I am worthy of love and healing. This feeling is temporary, and I hold myself with compassion.",
+    crisisNote: "If you're feeling overwhelmed or having thoughts of self-harm, please contact a mental health professional or call a crisis support line."
+  },
+  ANGRY: {
+    label: 'Frustrated',
+    emoji: '😤',
+    bg: '#FEF2F2',
+    border: '#FCA5A5',
+    textColor: '#991B1B',
+    dot: '#EF4444',
+    wellnessScore: 30,
+    message: "Anger signals a boundary or value was crossed. The goal isn't suppression — it's wise, healthy processing.",
+    quote: { text: "For every minute angry, you give up sixty seconds of peace.", author: "R.W. Emerson" },
+    techniques: [
+      { icon: "🌬️", title: "4-7-8 Breathing", description: "Inhale 4s → Hold 7s → Exhale 8s. Directly activates your parasympathetic nervous system." },
+      { icon: "💧", title: "Cold Water Reset", description: "Splash cold water on your face. This triggers the dive reflex, slowing your heart rate immediately." },
+      { icon: "💪", title: "Physical Release", description: "Brisk walk, push-ups, or squeezing a pillow. Move the adrenaline out safely." },
+      { icon: "✍️", title: "Anger Journaling", description: "Write: 'What happened? What boundary was crossed? What do I actually need right now?'" },
+    ],
+    affirmation: "I acknowledge my anger without being controlled by it. I choose wisdom over impulse.",
+    crisisNote: null
+  },
+  EXCITED: {
+    label: 'Energized',
+    emoji: '🤩',
+    bg: '#FDF4FF',
+    border: '#E879F9',
+    textColor: '#86198F',
+    dot: '#D946EF',
+    wellnessScore: 82,
+    message: "Your energy is electric right now — a genuine gift. Channel it with intention before the wave passes.",
+    quote: { text: "Energy is the essence of life. Every day you decide how you use it.", author: "Oprah Winfrey" },
+    techniques: [
+      { icon: "🎯", title: "Set a Clear Intention", description: "Write your top 3 priorities while motivation and clarity are at their peak." },
+      { icon: "🏋️", title: "Channel It Physically", description: "Use this energy for a workout, creative sprint, or any meaningful project." },
+      { icon: "🌊", title: "Breathe to Balance", description: "Inhale 5s, exhale 7s. Sustains your energy without tipping into overwhelm." },
+      { icon: "🗒️", title: "Capture Every Idea", description: "Your excited mind generates insights fast. Write them before the wave passes." },
+    ],
+    affirmation: "I direct this magnificent energy with clarity and purpose toward what truly matters.",
+    crisisNote: null
+  },
+  SURPRISED: {
+    label: 'Startled',
+    emoji: '😲',
+    bg: '#F5F3FF',
+    border: '#C4B5FD',
+    textColor: '#5B21B6',
+    dot: '#8B5CF6',
+    wellnessScore: 60,
+    message: "Something caught you off guard. Your nervous system just needs a moment to recalibrate — that's completely natural.",
+    quote: { text: "Life is what happens while you're busy making other plans.", author: "John Lennon" },
+    techniques: [
+      { icon: "🌿", title: "5-4-3-2-1 Grounding", description: "Name 5 things you see, 4 touch, 3 hear, 2 smell, 1 taste. Returns you to the present." },
+      { icon: "🫁", title: "Slow Your Breath", description: "Take 3 deliberate slow breaths. Signals 'you are safe' to your nervous system." },
+      { icon: "🧘", title: "Sit With It", description: "Allow the surprise to settle without judgement. It's just new information arriving." },
+      { icon: "🔍", title: "Curiosity Over Anxiety", description: "Ask gently: 'What does this actually mean for me? What's my wisest next step?'" },
+    ],
+    affirmation: "I am adaptable and resilient. I can process and integrate whatever arrives in my life.",
+    crisisNote: null
+  },
+  NEUTRAL: {
+    label: 'Balanced',
+    emoji: '😌',
+    bg: '#F0FDF4',
+    border: '#6EE7B7',
+    textColor: '#065F46',
+    dot: '#10B981',
+    wellnessScore: 72,
+    message: "A calm, centred state — the fertile ground of emotional intelligence and intentional living. Honour this.",
+    quote: { text: "Calmness is the cradle of power.", author: "J.G. Holland" },
+    techniques: [
+      { icon: "🧘", title: "Mindful Body Scan", description: "Scan your body from head to toe. Where do you notice tension, warmth, or sensation?" },
+      { icon: "🎯", title: "Set an Intention", description: "What quality do you want to embody in the next hour? Write it down." },
+      { icon: "🌱", title: "Gratitude Moment", description: "Name 3 small, specific things you genuinely appreciate right now." },
+      { icon: "⚡", title: "Energy Check", description: "Rate your energy 1-10. What does your body actually need right now?" },
+    ],
+    affirmation: "I am present, aware, and open to this moment exactly as it is.",
+    crisisNote: null
   }
-];
+};

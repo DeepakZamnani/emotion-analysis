@@ -30,7 +30,7 @@ import {
   Timestamp,
   DocumentData
 } from 'firebase/firestore';
-import { SessionRecord, UserProfile } from './types';
+import { SessionRecord, UserProfile, MoodEntry } from './types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC9gRR1V45hmt7EGKfmBFkhrP2NpshuRes",
@@ -93,6 +93,60 @@ export async function getSessions(userId: string, limitCount = 30): Promise<Sess
     });
   } catch (err) {
     console.error('Firebase getSessions error:', err);
+    return [];
+  }
+}
+
+// ─── Mood entry helpers ───────────────────────────────────────────────────────
+
+export async function saveMoodEntry(entry: Omit<MoodEntry, 'id'>): Promise<void> {
+  try {
+    const ref = collection(db, 'users', entry.userId, 'moods');
+    await addDoc(ref, {
+      ...entry,
+      timestamp: Timestamp.fromDate(entry.timestamp)
+    });
+  } catch (err) {
+    console.error('Firebase saveMoodEntry error:', err);
+  }
+}
+
+export async function getTodayMoodEntry(userId: string): Promise<MoodEntry | null> {
+  try {
+    const ref = collection(db, 'users', userId, 'moods');
+    const q = query(ref, orderBy('timestamp', 'desc'), limit(1));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    const data = snapshot.docs[0].data() as DocumentData;
+    const ts: Date = (data.timestamp as Timestamp).toDate();
+    const today = new Date();
+    const isToday =
+      ts.getDate() === today.getDate() &&
+      ts.getMonth() === today.getMonth() &&
+      ts.getFullYear() === today.getFullYear();
+    if (!isToday) return null;
+    return { id: snapshot.docs[0].id, userId: data.userId, emotion: data.emotion, timestamp: ts };
+  } catch (err) {
+    console.error('Firebase getTodayMoodEntry error:', err);
+    return null;
+  }
+}
+
+export async function getRecentMoodEntries(userId: string, days = 7): Promise<MoodEntry[]> {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const ref = collection(db, 'users', userId, 'moods');
+    const q = query(ref, orderBy('timestamp', 'desc'), limit(days * 4));
+    const snapshot = await getDocs(q);
+    return snapshot.docs
+      .map(d => {
+        const data = d.data() as DocumentData;
+        return { id: d.id, userId: data.userId, emotion: data.emotion, timestamp: (data.timestamp as Timestamp).toDate() };
+      })
+      .filter(e => e.timestamp >= since);
+  } catch (err) {
+    console.error('Firebase getRecentMoodEntries error:', err);
     return [];
   }
 }

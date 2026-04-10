@@ -58,6 +58,13 @@ export interface EmotionTechnique {
   description: string;
 }
 
+export interface MoodEntry {
+  id?: string;
+  userId: string;
+  emotion: string;
+  timestamp: Date;
+}
+
 export interface EmotionConfig {
   label: string;
   emoji: string;

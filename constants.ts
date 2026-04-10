@@ -1,6 +1,47 @@
 
 import { EmotionConfig, ProjectDoc } from './types';
 
+export const AFFIRMATIONS: string[] = [
+  "I am worthy of love, care, and compassion — especially from myself.",
+  "My emotions are valid. Feeling them is not weakness; it is courage.",
+  "I am not my thoughts. I have the power to observe and choose my response.",
+  "Every breath I take is an opportunity to begin again.",
+  "I am growing through every challenge I face, even when it doesn't feel like it.",
+  "I deserve peace. I am allowed to let go of what no longer serves me.",
+  "Small steps forward are still progress. I honour every effort I make.",
+  "I am resilient. I have survived every difficult day so far.",
+  "I choose to treat myself with the same kindness I give to others.",
+  "My mental health is a priority, not a luxury.",
+  "I am not alone. There are people who care about me deeply.",
+  "Today I will focus on what I can control and release what I cannot.",
+  "I am enough, exactly as I am right now.",
+  "Healing is not linear. Every setback is part of my journey.",
+  "I give myself permission to feel, to rest, and to heal.",
+  "I am capable of creating positive change in my own life.",
+  "The present moment is where I find my strength.",
+  "I trust the process of my own growth and healing.",
+  "I am becoming a stronger, wiser version of myself each day.",
+  "My feelings are messengers, not enemies. I listen with curiosity.",
+  "I release the need for perfection and embrace my authentic self.",
+  "I am grateful for the small joys that colour my everyday life.",
+  "I have the courage to ask for help when I need it.",
+  "I am more than my struggles. My story is still being written.",
+  "Peace begins within me. I cultivate it with every mindful breath.",
+  "I radiate strength, even on the days I feel fragile.",
+  "I am learning to love myself — it is a practice, not a destination.",
+  "Today's difficulties are building tomorrow's resilience.",
+  "I honour my boundaries. Saying no is an act of self-respect.",
+  "I am open to joy. Happiness is something I allow into my life.",
+];
+
+export const CRISIS_RESOURCES = [
+  { name: "iCall (India)", contact: "9152987821", type: "📞", desc: "Psychological counselling & support" },
+  { name: "Vandrevala Foundation", contact: "1860-2662-345", type: "📞", desc: "24/7 mental health helpline" },
+  { name: "Snehi", contact: "044-24640050", type: "📞", desc: "Emotional support helpline" },
+  { name: "iMind", contact: "104", type: "📞", desc: "State mental health helpline" },
+  { name: "Crisis Text Line", contact: "Text HOME to 741741", type: "💬", desc: "Free 24/7 text-based crisis support" },
+];
+
 export const SYSTEM_INSTRUCTION = `
 You are EmoSense — a compassionate, clinical-grade hybrid emotion analysis engine. Detect human emotion by synthesising SPEECH SEMANTICS (words) and ACOUSTIC PROSODY (pitch, volume, tempo). Respond as a warm, professional mental-health companion.
 

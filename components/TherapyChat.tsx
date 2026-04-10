@@ -2,6 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, UserProfile } from '../types';
 import { sendTherapyMessage } from '../services/geminiChat';
+import { CRISIS_RESOURCES } from '../constants';
+import BreathingExercise from './BreathingExercise';
 
 interface TherapyChatProps {
   user: UserProfile;
@@ -11,7 +13,7 @@ const STARTER_PROMPTS = [
   "I've been feeling anxious lately...",
   "I'm having trouble sleeping",
   "I want to talk about my mood today",
-  "Help me with a breathing exercise",
+  "I'm feeling overwhelmed at work",
 ];
 
 const TypingIndicator = () => (
@@ -39,6 +41,7 @@ const TherapyChat: React.FC<TherapyChatProps> = ({ user }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isStarted, setIsStarted] = useState(false);
+  const [showBreathing, setShowBreathing] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -97,6 +100,8 @@ const TherapyChat: React.FC<TherapyChatProps> = ({ user }) => {
   // ── Welcome screen ──────────────────────────────────────────────────────────
   if (!isStarted) {
     return (
+      <>
+      {showBreathing && <BreathingExercise onClose={() => setShowBreathing(false)} />}
       <div className="flex flex-col gap-6 pb-28 px-4 pt-6 max-w-lg mx-auto">
         <div>
           <h1 className="text-2xl font-black text-slate-900">AI Therapy</h1>
@@ -159,6 +164,47 @@ const TherapyChat: React.FC<TherapyChatProps> = ({ user }) => {
           </div>
         </div>
 
+        {/* Breathing shortcut */}
+        <button
+          onClick={() => setShowBreathing(true)}
+          className="w-full flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 text-left transition-all hover:border-teal-200"
+          style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
+        >
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #ECFDF5, #D1FAE5)', border: '1px solid #6EE7B7' }}>
+            🫁
+          </div>
+          <div className="flex-1">
+            <p className="font-bold text-slate-800 text-sm">Guided Breathing</p>
+            <p className="text-slate-400 text-xs mt-0.5">Calm your mind before your session</p>
+          </div>
+          <svg className="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        {/* Crisis resources */}
+        <div className="bg-white rounded-2xl border border-slate-100 p-5"
+          style={{ boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-base">🚨</span>
+            <p className="text-xs font-black text-red-600 uppercase tracking-wider">Crisis Resources</p>
+          </div>
+          <div className="space-y-3">
+            {CRISIS_RESOURCES.map(r => (
+              <div key={r.name} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                <div>
+                  <p className="font-semibold text-slate-800 text-sm">{r.name}</p>
+                  <p className="text-slate-400 text-xs mt-0.5">{r.desc}</p>
+                </div>
+                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-xl ml-3 flex-shrink-0">
+                  {r.type} {r.contact}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <button
           onClick={startSession}
           className="w-full py-5 rounded-2xl font-bold text-white flex items-center justify-center gap-3 transition-all hover:scale-[1.01]"
@@ -168,6 +214,7 @@ const TherapyChat: React.FC<TherapyChatProps> = ({ user }) => {
           Begin Therapy Session
         </button>
       </div>
+      </>
     );
   }
 

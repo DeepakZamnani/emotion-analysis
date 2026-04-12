@@ -70,20 +70,26 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
   const analyseWithGemini = useCallback(async (spokenText: string) => {
     if (!spokenText.trim() || isProcessingRef.current) return;
     isProcessingRef.current = true;
+    console.log('[EmoSense] Sending to Gemini:', spokenText);
 
     setMessages(prev => [...prev, { role: 'user', text: spokenText, timestamp: new Date() }]);
     conversationRef.current.push({ role: 'user', text: spokenText });
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const contents = conversationRef.current.map(m => ({
+        role: m.role === 'assistant' ? 'model' : ('user' as 'user' | 'model'),
+        parts: [{ text: m.text }]
+      }));
+      console.log('[EmoSense] Contents:', JSON.stringify(contents));
+
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         config: { systemInstruction: SYSTEM_INSTRUCTION },
-        contents: conversationRef.current.map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.text }]
-        }))
+        contents
       });
+
+      console.log('[EmoSense] Raw response:', response.text);
 
       let text = response.text ?? '';
       const match = text.match(/\[EMOTION:\s*(\w+)\]/i);
@@ -103,7 +109,12 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
         conversationRef.current.push({ role: 'assistant', text });
       }
     } catch (e: any) {
-      console.error('[EmoSense] Gemini error:', e);
+      console.error('[EmoSense] Gemini error:', e?.message ?? e);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        text: `⚠️ Error: ${e?.message ?? 'Could not reach Gemini'}`,
+        timestamp: new Date()
+      }]);
     } finally {
       isProcessingRef.current = false;
     }

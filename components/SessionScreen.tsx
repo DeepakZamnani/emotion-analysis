@@ -1,10 +1,9 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { Message, EmotionEntry, SessionRecord, UserProfile } from '../types';
 import { SYSTEM_INSTRUCTION, EMOTION_CONFIG } from '../constants';
-import { decodeAudio, decodeAudioData, createPcmBlob } from '../services/audioUtils';
-import { detectPitch, calculateEnergy, calculateSpectralCentroid } from '../services/acousticAnalysis';
+import { detectPitch, calculateEnergy } from '../services/acousticAnalysis';
 import { generateSessionSummary } from '../services/geminiChat';
 import { saveSession } from '../firebase';
 import Visualizer from './Visualizer';
@@ -32,34 +31,87 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
   const [pitchHistory, setPitchHistory] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [completedSession, setCompletedSession] = useState<SessionRecord | null>(null);
-  const [note, setNote] = useState('');
+  const [interimText, setInterimText] = useState('');
 
-  const audioContextRef = useRef<{ input: AudioContext; output: AudioContext } | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const sessionRef = useRef<any>(null);
-  const nextStartTimeRef = useRef(0);
-  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<any>(null);
   const startTimeRef = useRef<Date>(new Date());
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const conversationRef = useRef<{ role: string; text: string }[]>([]);
+  const isProcessingRef = useRef(false);
+  const phaseRef = useRef<Phase>('idle');
+
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, interimText]);
 
-  const stopAudio = useCallback(() => {
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+  const stopEverything = useCallback(() => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.onend = null; recognitionRef.current.abort(); } catch (_) {}
+      recognitionRef.current = null;
+    }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    if (workletNodeRef.current) {
+      try { workletNodeRef.current.disconnect(); } catch (_) {}
+      workletNodeRef.current = null;
+    }
     if (audioContextRef.current) {
-      try { audioContextRef.current.input.close(); } catch (_) {}
-      try { audioContextRef.current.output.close(); } catch (_) {}
+      try { audioContextRef.current.close(); } catch (_) {}
       audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+  }, []);
+
+  const analyseWithGemini = useCallback(async (spokenText: string) => {
+    if (!spokenText.trim() || isProcessingRef.current) return;
+    isProcessingRef.current = true;
+
+    setMessages(prev => [...prev, { role: 'user', text: spokenText, timestamp: new Date() }]);
+    conversationRef.current.push({ role: 'user', text: spokenText });
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        config: { systemInstruction: SYSTEM_INSTRUCTION },
+        contents: conversationRef.current.map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.text }]
+        }))
+      });
+
+      let text = response.text ?? '';
+      const match = text.match(/\[EMOTION:\s*(\w+)\]/i);
+      if (match) {
+        const emo = match[1].toUpperCase();
+        setDetectedEmotion(emo);
+        setEmotionHistory(prev => [...prev, {
+          emotion: emo,
+          timestamp: new Date(),
+          snippet: spokenText.slice(0, 60)
+        }]);
+        text = text.replace(/\[EMOTION:\s*\w+\]/gi, '').trim();
+      }
+
+      if (text) {
+        setMessages(prev => [...prev, { role: 'assistant', text, timestamp: new Date() }]);
+        conversationRef.current.push({ role: 'assistant', text });
+      }
+    } catch (e: any) {
+      console.error('[EmoSense] Gemini error:', e);
+    } finally {
+      isProcessingRef.current = false;
     }
   }, []);
 
   const endSession = useCallback(async () => {
     setPhase('saving');
-    stopAudio();
-    sessionRef.current = null;
+    stopEverything();
 
     const endTime = new Date();
     const dominant = getDominantEmotion(emotionHistory);
@@ -67,10 +119,7 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
     const durationMinutes = Math.round((endTime.getTime() - startTimeRef.current.getTime()) / 60000);
     const transcript = messages.map(m => ({ role: m.role, text: m.text }));
 
-    const summary = await generateSessionSummary(
-      emotionHistory.map(e => e.emotion),
-      transcript
-    );
+    const summary = await generateSessionSummary(emotionHistory.map(e => e.emotion), transcript);
 
     const record: SessionRecord = {
       userId: user.userId,
@@ -89,7 +138,7 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
     setCompletedSession(saved);
     onSessionSaved(saved);
     setPhase('done');
-  }, [emotionHistory, messages, user.userId, stopAudio, onSessionSaved]);
+  }, [emotionHistory, messages, user.userId, stopEverything, onSessionSaved]);
 
   const startSession = async () => {
     setPhase('connecting');
@@ -98,130 +147,113 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
     setEmotionHistory([]);
     setDetectedEmotion('NEUTRAL');
     setPitchHistory([]);
+    setInterimText('');
+    conversationRef.current = [];
+    isProcessingRef.current = false;
     startTimeRef.current = new Date();
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Microphone not available. Open over HTTPS or localhost.');
+      }
+
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        throw new Error('Speech recognition not supported. Please use Chrome or Edge.');
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      audioContextRef.current = { input: inputCtx, output: outputCtx };
+      // AudioContext for visualizer + pitch/energy metrics only
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      await audioCtx.resume();
+      audioContextRef.current = audioCtx;
 
-      const analyser = inputCtx.createAnalyser();
+      const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 1024;
       analyserRef.current = analyser;
 
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction: SYSTEM_INSTRUCTION,
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } },
-          outputAudioTranscription: {},
-          inputAudioTranscription: {}
-        },
-        callbacks: {
-          onopen: () => {
-            setPhase('active');
-            const source = inputCtx.createMediaStreamSource(stream);
-            source.connect(analyser);
-            const scriptProcessor = inputCtx.createScriptProcessor(2048, 1, 1);
-            scriptProcessor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const currentPitch = detectPitch(inputData, inputCtx.sampleRate);
-              const currentEnergy = calculateEnergy(inputData);
-              const freqData = new Uint8Array(analyser.frequencyBinCount);
-              analyser.getByteFrequencyData(freqData);
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
 
-              if (currentEnergy > 0.005) {
-                setMetrics(prev => ({
-                  pitch: currentPitch || prev.pitch,
-                  energy: Number(currentEnergy.toFixed(4))
-                }));
-                if (currentPitch > 0) setPitchHistory(p => [...p.slice(-20), currentPitch]);
-              }
-
-              const pcmBlob = createPcmBlob(inputData);
-              sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
-            };
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(inputCtx.destination);
-          },
-          onmessage: async (msg: any) => {
-            if (msg.serverContent?.outputTranscription) {
-              let text = msg.serverContent.outputTranscription.text;
-              const match = text.match(/\[EMOTION:\s*(\w+)\]/i);
-              if (match) {
-                const emo = match[1].toUpperCase();
-                setDetectedEmotion(emo);
-                setEmotionHistory(prev => [...prev, {
-                  emotion: emo,
-                  timestamp: new Date(),
-                  snippet: text.replace(/\[EMOTION:\s*\w+\]/gi, '').trim().slice(0, 60)
-                }]);
-                text = text.replace(/\[EMOTION:\s*\w+\]/gi, '').trim();
-              }
-              if (text) {
-                setMessages(prev => {
-                  const last = prev[prev.length - 1];
-                  if (last?.role === 'assistant') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-                  return [...prev, { role: 'assistant', text, timestamp: new Date() }];
-                });
-              }
-            } else if (msg.serverContent?.inputTranscription) {
-              const text = msg.serverContent.inputTranscription.text;
-              if (text) {
-                setMessages(prev => {
-                  const last = prev[prev.length - 1];
-                  if (last?.role === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-                  return [...prev, { role: 'user', text, timestamp: new Date() }];
-                });
-              }
-            }
-
-            const audioData = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (audioData && outputCtx) {
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
-              const decoded = decodeAudio(audioData);
-              const buffer = await decodeAudioData(decoded, outputCtx, 24000, 1);
-              const src = outputCtx.createBufferSource();
-              src.buffer = buffer;
-              src.connect(outputCtx.destination);
-              src.start(nextStartTimeRef.current);
-              nextStartTimeRef.current += buffer.duration;
-              sourcesRef.current.add(src);
-              src.onended = () => sourcesRef.current.delete(src);
-            }
-            if (msg.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => s.stop());
-              sourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
-            }
-          },
-          onerror: () => {
-            setError('Connection lost. Please try again.');
-            setPhase('idle');
-            stopAudio();
-          },
-          onclose: () => {
-            if (phase === 'active') setPhase('idle');
-            stopAudio();
+      // AudioWorklet for pitch/energy metrics
+      const workletSrc = `
+        class PCMCapture extends AudioWorkletProcessor {
+          process(inputs) {
+            const ch = inputs[0]?.[0];
+            if (ch) this.port.postMessage(new Float32Array(ch));
+            return true;
           }
         }
-      });
-      sessionRef.current = sessionPromise;
+        registerProcessor('pcm-capture', PCMCapture);
+      `;
+      const blobUrl = URL.createObjectURL(new Blob([workletSrc], { type: 'application/javascript' }));
+      await audioCtx.audioWorklet.addModule(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+
+      const workletNode = new AudioWorkletNode(audioCtx, 'pcm-capture');
+      workletNodeRef.current = workletNode;
+      workletNode.port.onmessage = (e) => {
+        const data: Float32Array = e.data;
+        const currentPitch = detectPitch(data, audioCtx.sampleRate);
+        const currentEnergy = calculateEnergy(data);
+        if (currentEnergy > 0.005) {
+          setMetrics(prev => ({
+            pitch: currentPitch || prev.pitch,
+            energy: Number(currentEnergy.toFixed(4))
+          }));
+          if (currentPitch > 0) setPitchHistory(p => [...p.slice(-20), currentPitch]);
+        }
+      };
+      source.connect(workletNode);
+
+      // Web Speech API for transcription
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognitionRef.current = recognition;
+
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let finalText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) finalText += t;
+          else interim += t;
+        }
+        setInterimText(interim);
+        if (finalText.trim()) {
+          setInterimText('');
+          analyseWithGemini(finalText.trim());
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        if (event.error === 'no-speech' || event.error === 'aborted') return;
+        console.error('[EmoSense] Speech error:', event.error);
+      };
+
+      // Auto-restart — continuous mode stops after silence on some browsers
+      recognition.onend = () => {
+        if (phaseRef.current === 'active' && recognitionRef.current) {
+          try { recognitionRef.current.start(); } catch (_) {}
+        }
+      };
+
+      recognition.start();
+      setPhase('active');
     } catch (err: any) {
-      setError(err.message || 'Could not access microphone.');
+      setError(err.message || 'Could not start session.');
       setPhase('idle');
-      stopAudio();
+      stopEverything();
     }
   };
 
   const cfg = EMOTION_CONFIG[detectedEmotion] ?? EMOTION_CONFIG.NEUTRAL;
 
-  // ── Done / Summary ──────────────────────────────────────────────────────────
+  // ── Done ────────────────────────────────────────────────────────────────────
   if (phase === 'done' && completedSession) {
     const doneCfg = EMOTION_CONFIG[completedSession.dominantEmotion] ?? EMOTION_CONFIG.NEUTRAL;
     return (
@@ -238,7 +270,6 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
           </div>
         </div>
 
-        {/* Summary card */}
         <div className="bg-white rounded-2xl border p-5"
           style={{ borderColor: doneCfg.border, boxShadow: '0 4px 20px rgba(0,0,0,0.06)' }}>
           <div className="flex items-center gap-3 mb-4">
@@ -248,14 +279,12 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
               <p className="text-slate-400 text-sm">{completedSession.durationMinutes} min · Wellness score: {completedSession.wellnessScore}/100</p>
             </div>
           </div>
-
           {completedSession.summary && (
             <div className="bg-slate-50 rounded-xl p-4 mb-4">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Clinical Summary</p>
               <p className="text-slate-700 text-sm leading-relaxed">{completedSession.summary}</p>
             </div>
           )}
-
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Emotion Arc</p>
             <div className="flex flex-wrap gap-1.5">
@@ -272,9 +301,7 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
           </div>
         </div>
 
-        {/* Healing tip */}
-        <div className="rounded-2xl p-5 border"
-          style={{ background: doneCfg.bg, borderColor: doneCfg.border }}>
+        <div className="rounded-2xl p-5 border" style={{ background: doneCfg.bg, borderColor: doneCfg.border }}>
           <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: doneCfg.textColor }}>
             💙 Recommended Next Step
           </p>
@@ -320,11 +347,10 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
           </div>
         )}
 
-        {/* What to expect cards */}
         <div className="space-y-3">
           {[
             { icon: '🎙️', title: 'Voice Analysis', body: 'Your microphone captures speech. No audio is stored — only analysis results.' },
-            { icon: '🧠', title: 'Hybrid AI Detection', body: 'Gemini analyses both what you say and how you say it — words + vocal tone.' },
+            { icon: '🧠', title: 'AI Emotion Detection', body: 'Gemini analyses your words in real time and responds with empathy.' },
             { icon: '💾', title: 'Automatic Save', body: 'Your session summary and emotional arc are saved securely to your records.' },
           ].map(c => (
             <div key={c.title} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-start gap-3"
@@ -358,7 +384,7 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 pb-24 px-4">
         <div className="w-16 h-16 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
         <p className="text-slate-800 font-bold text-lg">Initialising EmoSense...</p>
-        <p className="text-slate-400 text-sm text-center">Connecting to AI analysis engine.<br />Please allow microphone access when prompted.</p>
+        <p className="text-slate-400 text-sm text-center">Setting up microphone & speech recognition.</p>
       </div>
     );
   }
@@ -382,10 +408,8 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
       </div>
 
       {/* Emotion display */}
-      <div
-        className="rounded-2xl p-5 flex items-center gap-4 border transition-all duration-700"
-        style={{ background: cfg.bg, borderColor: cfg.border }}
-      >
+      <div className="rounded-2xl p-5 flex items-center gap-4 border transition-all duration-700"
+        style={{ background: cfg.bg, borderColor: cfg.border }}>
         <span className="text-5xl">{cfg.emoji}</span>
         <div>
           <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cfg.textColor }}>
@@ -445,20 +469,26 @@ const SessionScreen: React.FC<SessionScreenProps> = ({ user, onSessionSaved }) =
           <span className="text-[10px] text-slate-300">{messages.length} messages</span>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ scrollbarWidth: 'none' }}>
-          {messages.length === 0 && (
+          {messages.length === 0 && !interimText && (
             <p className="text-slate-300 text-sm text-center py-4">Start speaking to begin...</p>
           )}
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                m.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700'
+                m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'
               }`}>
                 {m.text}
               </div>
             </div>
           ))}
+          {/* Interim speech — shows what's being heard before final result */}
+          {interimText && (
+            <div className="flex justify-end">
+              <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed bg-blue-100 text-blue-400 italic">
+                {interimText}
+              </div>
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
       </div>
